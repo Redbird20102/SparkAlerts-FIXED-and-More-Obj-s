@@ -225,8 +225,7 @@ function nosyncLog(message) {
 }
 
 // Health check endpoint - no rate limit or origin check for monitoring
-// Randomized path for security through obscurity
-app.get('/healthcheck8745425554458', (req, res, next) => {
+app.get('/healthcheck', (req, res, next) => {
     res.status(200).send({ status: "OK", timestamp: new Date().toISOString() });
 });
 
