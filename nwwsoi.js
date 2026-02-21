@@ -19,6 +19,9 @@ const { log } = require('./logging.js');
 const { sign } = require('crypto');
 const https = require('https');
 
+// Load phenomena mapping
+const phenomena = require('./phenomena.json');
+
 // For storing crexentials
 var username = null;
 var password = null;
@@ -62,6 +65,26 @@ function filterAlertsOnStartup() {
 }
 
 filterAlertsOnStartup();
+
+// Helper: build alert name from phenomena and significance codes
+function buildAlertNameFromVtec(phenomCode, significanceCode) {
+    if (!phenomCode || !significanceCode) return null;
+    
+    // Look up phenomenon name from phenomena.json
+    const phenomEntry = phenomena[phenomCode];
+    if (!phenomEntry || !phenomEntry.name) return null;
+    
+    // Map significance code to label
+    const significanceMap = {
+        'W': 'Warning',
+        'A': 'Watch',
+        'Y': 'Advisory',
+        'S': 'Statement'
+    };
+    
+    const label = significanceMap[significanceCode] || significanceCode;
+    return `${phenomEntry.name} ${label}`;
+}
 
 (async () => {
     // Polyfill WebSocket for @xmpp/client
@@ -852,15 +875,15 @@ Louisiana out 20 to 60 NM-`;
  // --- Reorder and build minimalParts per user spec:
                             // preamble (if any) -> event -> sender -> issued -> UGC -> areaDesc -> NWSheadline -> description -> instruction
                             let minimalParts = [];
-                            if (preamble) minimalParts.push(preamble);
-                            if (event) minimalParts.push(event);
-                            if (sender) minimalParts.push(sender);
-                            if (sent) minimalParts.push(formatIssuedTime(sent));
-                            if (ugcLine) minimalParts.push(ugcLine);
-                            if (areaDesc) minimalParts.push(areaDesc);
-                            if (capNwsHeadline) minimalParts.push(capNwsHeadline);
-                            if (description) minimalParts.push(description);
-                            if (instruction) minimalParts.push(instruction);
+                            if (preamble) minimalParts.push(formatMessageNewlines(preamble));
+                            if (event) minimalParts.push(formatMessageNewlines(event));
+                            if (sender) minimalParts.push(formatMessageNewlines(sender));
+                            if (sent) minimalParts.push(formatMessageNewlines(formatIssuedTime(sent)));
+                            if (ugcLine) minimalParts.push(formatMessageNewlines(ugcLine));
+                            if (areaDesc) minimalParts.push(formatMessageNewlines(areaDesc));
+                            if (capNwsHeadline) minimalParts.push(formatMessageNewlines(capNwsHeadline));
+                            if (description) minimalParts.push(formatMessageNewlines(description));
+                            if (instruction) minimalParts.push(formatMessageNewlines(instruction));
 
                             // --- START: Extract coordinates (LAT...LON) and Event Motion for message ---
                             function decToUgcpair(lat, lon) {
@@ -1044,8 +1067,11 @@ Louisiana out 20 to 60 NM-`;
  // --- END: Extract coordinates and Event Motion ---
 
                             if (minimalParts.length) {
-                                rawText = minimalParts.join('\n') + '\n';
-                                // normalize paragraphs (preserve paragraph breaks; join wrapped lines)
+                                // join parts with double-newlines so that normalizeParagraphs treats them as separate
+                                rawText = minimalParts.join('\n\n') + '\n';
+                                // normalize newlines (convert escaped sequences and clean structure) first
+                                rawText = formatMessageNewlines(rawText);
+                                // then normalize paragraphs (preserve paragraph breaks; join wrapped lines)
                                 rawText = normalizeParagraphs(rawText);
                                 if (capNwsHeadline) {
                                     const re2 = new RegExp('^' + capNwsHeadline.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&') + '\\s*\\n?', 'i');
@@ -1129,20 +1155,36 @@ Louisiana out 20 to 60 NM-`;
             var alertName = alertNameMatch ? alertNameMatch[1].trim() : null;
 
             // Fallback to BULLETIN preamble if no CAP <event> found
+            // Use a more precise pattern to avoid matching generic "WARNING" words
             if (!alertName) {
-                alertNameMatch = rawText.match(/BULLETIN.*?\s+(.*?)\s+National Weather Service/i);
+                // First try to match specific pattern with alert type immediately after BULLETIN
+                alertNameMatch = rawText.match(/BULLETIN\s+(?:FOR\s+)?([A-Z][A-Z\s]*?(?:WARNING|WATCH|ADVISORY|STATEMENT|ALERT|EMERGENCY))/i);
+                if (!alertNameMatch) {
+                    // Fallback to original pattern
+                    alertNameMatch = rawText.match(/BULLETIN.*?\s+(.*?)\s+National Weather Service/i);
+                }
                 alertName = alertNameMatch ? alertNameMatch[1].trim() : null;
             }
 
             // Final fallback
             if (!alertName) alertName = 'Unknown Alert';
 
-            // If name is generic/unknown, try to infer a better name from the message using allowedalerts.json
+            // If name is generic/unknown, or if allowedAlerts might have a better match, try to infer a better name
             // Rules:
-            // - If message contains an allowed alert name (case-insensitive), use that name.
+            // - If message contains an allowed alert name (case-insensitive), prefer that.
             // - Do NOT use "Severe Weather Statement" or "Flash Flood Statement" even if present.
             // - "Special Weather Statement" is allowed and will be used if present in allowedalerts.json.
-            if ((!alertName || alertName === 'Unknown Alert') && Array.isArray(allowedAlerts)) {
+            let shouldCheckAllowed = (!alertName || alertName === 'Unknown Alert');
+            if (!shouldCheckAllowed && Array.isArray(allowedAlerts)) {
+                // Also check if current alertName is too generic or if allowedAlerts has a better/more specific match
+                const txt = String(rawText || '').toUpperCase();
+                const au = alertName.toUpperCase();
+                // Re-check if current name is just a generic "WARNING" and allowedAlerts has something more specific
+                if (/^[A-Z\s]{1,20}WARNING$/.test(au) && allowedAlerts.some(a => txt.includes(String(a || '').toUpperCase()))) {
+                    shouldCheckAllowed = true;
+                }
+            }
+            if (shouldCheckAllowed && Array.isArray(allowedAlerts)) {
                 const txt = String(rawText || '').toUpperCase();
                 const excluded = new Set(['SEVERE WEATHER STATEMENT', 'FLASH FLOOD STATEMENT']);
                 const matches = allowedAlerts.filter(a => {
@@ -1902,8 +1944,41 @@ Louisiana out 20 to 60 NM-`;
 
                 const formattedMessage = formatMessageNewlines(msgPart);
 
+                // Build alert name for this specific message part (handle split alerts and VTEC+significance)
+                let partAlertName = alertName; // start with the overall alert name
+                
+                // If we have phenomena and significance, try to build a proper name from VTEC data
+                const partPhen = (vtecObj && vtecObj.phenomena) || phen;
+                const partSig = (vtecObj && vtecObj.significance) || sig;
+                if (partPhen && partSig) {
+                    const vtecBasedName = buildAlertNameFromVtec(partPhen, partSig);
+                    if (vtecBasedName) {
+                        partAlertName = vtecBasedName;
+                    }
+                }
+                
+                // If still no good name, search the message part text for alert type keywords
+                if (!partAlertName || partAlertName === 'Unknown Alert') {
+                    const keywords = ['ADVISORY', 'WARNING', 'WATCH', 'ALERT', 'STATEMENT', 'EMERGENCY'];
+                    const upperMsg = msgPart.toUpperCase();
+                    for (const kw of keywords) {
+                        const idx = upperMsg.indexOf(kw);
+                        if (idx !== -1) {
+                            // Extract context around the keyword
+                            const start = Math.max(0, idx - 100);
+                            const end = Math.min(upperMsg.length, idx + kw.length + 100);
+                            const context = msgPart.substring(start, end);
+                            const match = context.match(/([A-Z][A-Z\s\-]{3,60}?)\s+(ADVISORY|WARNING|WATCH|ALERT|STATEMENT|EMERGENCY)/i);
+                            if (match && match[1]) {
+                                partAlertName = match[1].trim().replace(/\s+/g, ' ');
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 let alertObj = {
-                    name: alertName,
+                    name: partAlertName || alertName || 'Unknown Alert',
                     id: (messageParts.length === 1) ? baseId : (baseId + '_' + idx),
                     sender: (vtecObj && vtecObj.office) ? vtecObj.office : (thisObject && thisObject.office) || '',
                     headline: headline,
@@ -2174,7 +2249,13 @@ Louisiana out 20 to 60 NM-`;
                     if (secs['IMPACT']) ai.IMPACT = secs['IMPACT'];
 
                     // damage / threat-specific values (set from headings when present)
-                    if (secs['TORNADO']) ai.TORNADO = secs['TORNADO'];
+                    // TORNADO should only be set if explicitly found as a heading; clean it to core threat value
+                    if (secs['TORNADO']) {
+                        let tornadoVal = secs['TORNADO'].trim().toUpperCase();
+                        // Extract just the threat indicator (POSSIBLE, OBSERVED, RADAR INDICATED, CONFIRMED, etc.)
+                        const tornadoMatch = tornadoVal.match(/^(POSSIBLE|OBSERVED|RADAR\s+INDICATED|CONFIRMED|LIKELY)/);
+                        ai.TORNADO = tornadoMatch ? tornadoMatch[1] : tornadoVal.split(/[\s\-\$\&]/)[0];
+                    }
                     if (secs['TORNADO DAMAGE THREAT']) ai.TORNADO_DAMAGE_THREAT = secs['TORNADO DAMAGE THREAT'];
                     if (secs['THUNDERSTORM DAMAGE THREAT']) ai.THUNDERSTORM_DAMAGE_THREAT = secs['THUNDERSTORM DAMAGE THREAT'];
                     if (secs['FLASH FLOOD DAMAGE THREAT']) ai.FLASH_FLOOD_DAMAGE_THREAT = secs['FLASH FLOOD DAMAGE THREAT'];
@@ -2215,11 +2296,12 @@ Louisiana out 20 to 60 NM-`;
                     fallbackSet('HAIL_DAMAGE_THREAT', hailThreatRe, s => s.trim());
                     fallbackSet('WIND_THREAT', windThreatRe, s => s.trim());
                     fallbackSet('WIND_DAMAGE_THREAT', windThreatRe, s => s.trim());
-                    fallbackSet('FLASH_FLOOD_DAMAGE_THREAT', flashThreatRe, s => s.trim());
+                    // NOTE: Do NOT add fallback for FLASH_FLOOD_DAMAGE_THREAT — only use explicit headings
 
                     // Also populate short-form FLASH_FLOOD if present as a heading or sentence
+                    // Only capture core threat indicators (OBSERVED, RADAR INDICATED, etc.), not trailing text
                     if (!ai.FLASH_FLOOD) {
-                        const mff = full.match(/(^|\n)FLASH\s*FLOOD(?:\s*[:\.]|\s|\.|\n)\s*([^\n]+)/i);
+                        const mff = full.match(/(^|\n)FLASH\s*FLOOD(?:\s*[:\.]|\s+)([A-Z][A-Z\s\-]{0,40}?)(?=\s*$|\s*\n|(?:\s+(?:IN|AT|WILL|FOR|FROM|TO)))/i);
                         if (mff && mff[2]) ai.FLASH_FLOOD = mff[2].trim();
                     }
 
@@ -2243,6 +2325,8 @@ Louisiana out 20 to 60 NM-`;
                         // Common short keywords we want to preserve
                         if (/\bPOSSIBLE\b/.test(core)) return 'POSSIBLE';
                         if (/\bCONSIDERABLE\b/.test(core)) return 'CONSIDERABLE';
+                        if (/\bDESTRUCTIVE\b/.test(core)) return 'DESTRUCTIVE';
+                        if (/\bCATASTROPHIC\b/.test(core)) return 'CATASTROPHIC';
                         if (/\bNONE\b/.test(core)) return 'NONE';
                         if (/\bLIKELY\b/.test(core)) return 'LIKELY';
                         if (/\bCONFIRMED\b/.test(core)) return 'CONFIRMED';
@@ -2287,11 +2371,11 @@ Louisiana out 20 to 60 NM-`;
                     alerts = [];
                 }
 
-                // For each parsedAlert, remove any existing alert with the same eventTrackingNumber, then add the new one
+                // For each parsedAlert, remove any existing alert with the same id, then add the new one
                 parsedAlerts.forEach(parsedAlert => {
-                    const etn = parsedAlert.properties && parsedAlert.properties.event_tracking_number;
-                    if (etn) {
-                        const removedAlerts = alerts.filter(alert => alert.properties && alert.properties.event_tracking_number === etn);
+                    const alertId = parsedAlert.id;
+                    if (alertId) {
+                        const removedAlerts = alerts.filter(alert => alert.id === alertId);
                         if (removedAlerts.length > 0) {
                             removedAlerts.forEach(removedAlert => {
                                 console.log(`✗ Alert removed: ${removedAlert.name} (ID: ${removedAlert.id})`);
@@ -2299,7 +2383,7 @@ Louisiana out 20 to 60 NM-`;
                             });
                         }
                         alerts = alerts.filter(alert => {
-                            return !(alert.properties && alert.properties.event_tracking_number === etn);
+                            return !(alert.id === alertId);
                         });
                     }
                     alerts.push(parsedAlert);

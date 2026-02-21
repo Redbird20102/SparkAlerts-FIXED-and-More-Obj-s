@@ -1,0 +1,254 @@
+{
+  "AF": {
+    "name": "Ashfall",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "AS": {
+    "name": "Air Stagnation",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "BH": {
+    "name": "Beach Hazard",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "BS": {
+    "name": "Blowing Snow",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "BW": {
+    "name": "Brisk Wind",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "BZ": {
+    "name": "Blizzard",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "CF": {
+    "name": "Coastal Flood",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "DS": {
+    "name": "Dust Storm",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "DU": {
+    "name": "Blowing Dust",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "EC": {
+    "name": "Extreme Cold",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "EH": {
+    "name": "Excessive Heat",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "EW": {
+    "name": "Extreme Wind",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "FA": {
+    "name": "Areal Flood",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "FF": {
+    "name": "Flash Flood",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "FG": {
+    "name": "Dense Fog",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "FL": {
+    "name": "Flood",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "FR": {
+    "name": "Frost",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "FW": {
+    "name": "Fire Weather",
+    "significance": ["A", "Y", "S"]
+  },
+  "FZ": {
+    "name": "Freeze",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "GL": {
+    "name": "Gale",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "HF": {
+    "name": "Hurricane Force Wind",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "HI": {
+    "name": "Inland Hurricane Wind",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "HS": {
+    "name": "Heavy Snow",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "HT": {
+    "name": "Heat",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "HU": {
+    "name": "Hurricane",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "HW": {
+    "name": "High Wind",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "HY": {
+    "name": "Hydrologic",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "HZ": {
+    "name": "Hard Freeze",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "IS": {
+    "name": "Ice Storm",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "LB": {
+    "name": "Lake Effect Snow and Blowing Snow",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "LE": {
+    "name": "Lake Effect Snow",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "LO": {
+    "name": "Low Water",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "LS": {
+    "name": "Lakeshore Flood",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "LW": {
+    "name": "Lake Wind",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "MA": {
+    "name": "Marine Weather",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "MF": {
+    "name": "Marine Dense Fog",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "MH": {
+    "name": "Marine Ashfall",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "MS": {
+    "name": "Dense Smoke",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "RB": {
+    "name": "Small Craft for Rough Bar",
+    "significance": ["W", "A", "Y", "S"]
+  }, 
+   "RH": {
+    "name": "Radiological Hazard",
+    "significance": ["W", "A", "Y", "S"]
+  },
+   "RP": {
+    "name": "Rip Current",
+    "significance": ["W", "A", "Y", "S"]
+ },
+  "SC": {
+    "name": "Small Craft Advisory",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "SE": {
+    "name": "Hazardous Seas",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "SI": {
+    "name": "Small Craft for Winds",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "SM": {
+    "name": "Dense Smoke",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "SN": {
+    "name": "Snow",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "SQ": {
+    "name": "Snow Squall",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "SR": {
+    "name": "Storm",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "SU": {
+    "name": "High Surf",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "SV": {
+    "name": "Severe Thunderstorm",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "SW": {
+    "name": "Small Craft for Hazardous Seas",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "TI": {
+    "name": "Inland Tropical Storm Wind",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "TO": {
+    "name": "Tornado",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "TR": {
+    "name": "Tropical Storm",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "TS": {
+    "name": "Tsunami",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "TY": {
+    "name": "Typhoon",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "UP": {
+    "name": "Heavy Freezing Spray",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "WC": {
+    "name": "Wind Chill",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "WI": {
+    "name": "Wind",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "WS": {
+    "name": "Winter Storm",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "WW": {
+    "name": "Winter Weather",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "ZF": {
+    "name": "Freezing Fog",
+    "significance": ["W", "A", "Y", "S"]
+  },
+  "ZR": {
+    "name": "Freezing Rain",
+    "significance": ["W", "A", "Y", "S"]
+  }
+}
