@@ -26,6 +26,43 @@ var resource = null;
 var MAX_RECONNECT_ATTEMPTS = 10;
 var INITIAL_RECONNECT_DELAY = 2000;
 
+// Startup alert filtering: remove alerts with same eventTrackingNumber if issued before another's startTime
+
+function filterAlertsOnStartup() {
+    try {
+        let alerts = [];
+        try {
+            const raw = fs.readFileSync('alerts.json', 'utf8');
+            alerts = raw.trim() ? JSON.parse(raw) : [];
+            if (!Array.isArray(alerts)) alerts = [];
+        } catch (readErr) {
+            if (readErr.code !== 'ENOENT') {
+                console.warn('alerts.json unreadable during startup filter:', readErr.message);
+            }
+            return;
+        }
+        const etnMap = {};
+        alerts.forEach(alert => {
+            const etn = alert.properties && alert.properties.event_tracking_number;
+            if (!etn) return;
+            const issued = new Date(alert.issued || alert.properties.recievedTime || 0).getTime();
+            if (!etnMap[etn] || issued > etnMap[etn].issued) {
+                etnMap[etn] = { alert, issued };
+            }
+        });
+        // Add alerts without event_tracking_number
+        const filteredAlerts = alerts.filter(alert => !(alert.properties && alert.properties.event_tracking_number));
+        // Add only the latest alert for each eventTrackingNumber
+        filteredAlerts.push(...Object.values(etnMap).map(obj => obj.alert));
+        fs.writeFileSync('alerts.json', JSON.stringify(filteredAlerts, null, 2));
+        console.log('Startup alert filter applied.');
+    } catch (err) {
+        console.error('Error during startup alert filter:', err);
+    }
+}
+
+filterAlertsOnStartup();
+
 (async () => {
     // Polyfill WebSocket for @xmpp/client
     const { client, xml } = await import('@xmpp/client');
@@ -53,13 +90,18 @@ var INITIAL_RECONNECT_DELAY = 2000;
                 return; // Nothing to clean
             }
 
-            // Filter out expired alerts (iterate backwards to avoid issues)
+            // Remove alerts whose endTime (expiry) is in the past
             const now = new Date();
             const initialCount = alerts.length;
             alerts = alerts.filter(alert => {
-                if (!alert.expiry) return true; // Keep alerts without expiry
-                const expiry = new Date(alert.expiry);
-                return now <= expiry; // Keep only non-expired alerts
+                let endTime = null;
+                if (alert.expiry) {
+                    endTime = new Date(alert.expiry);
+                } else if (alert.properties && alert.properties.vtec && alert.properties.vtec.endTime) {
+                    endTime = new Date(alert.properties.vtec.endTime);
+                }
+                if (!endTime || isNaN(endTime.getTime())) return true; // Keep if no valid endTime
+                return now <= endTime; // Keep only non-expired alerts
             });
 
             const removedCount = initialCount - alerts.length;
@@ -245,6 +287,8 @@ try {
 
             // Extract raw text content
             var rawText = result.message.x[0]._;
+            // Only do basic escaping cleanup early — preserve preamble structure
+            rawText = rawText.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
 
             // Helper: parse a human-readable timestamp from the message text and return an ISO UTC string.
             // Matches examples like "1037 PM PST Fri Feb 13 2026" or "9:28 PM MST Fri Feb 13 2026".
@@ -301,6 +345,9 @@ try {
             const isFullMessage = fullMsgKeywords.test(rawText);
 
             let cleanedCAPXML = false;
+            // set when we perform the non‑VTEC "minimal cleanup" from a CAP payload —
+            // used to prevent splitting and other full-message behaviors
+            let capMinimalCleanup = false;
             if (!isFullMessage) {
                 // ===================== CAP XML CLEANUP ===========================
                 // If the message contains a CAP XML payload, clean it up as requested
@@ -461,6 +508,8 @@ Louisiana out 20 to 60 NM-`;
                         // Replace message in parsedAlert/message
                         rawText = finalMsg;
                     });
+                    // Normalize the full rawText after CAP cleanup to convert escape sequences and clean structure
+                    rawText = formatMessageNewlines(rawText);
                 }
                 // ===================== END CAP XML CLEANUP ===========================
             }
@@ -800,8 +849,7 @@ Louisiana out 20 to 60 NM-`;
                                     return sent;
                                 }
                             }
-
-                            // --- Reorder and build minimalParts per user spec:
+ // --- Reorder and build minimalParts per user spec:
                             // preamble (if any) -> event -> sender -> issued -> UGC -> areaDesc -> NWSheadline -> description -> instruction
                             let minimalParts = [];
                             if (preamble) minimalParts.push(preamble);
@@ -1017,20 +1065,6 @@ Louisiana out 20 to 60 NM-`;
                 !allowByEvent
             ) {
                 return;
-            }
-
-            // If no VTEC but allowed by event, set some defaults for thisObject
-            if ((!thisObject.phenomena || !thisObject.significance) && allowByEvent) {
-                thisObject = {
-                    product: '',
-                    actions: '',
-                    office: '',
-                    phenomena: '',
-                    significance: '',
-                    eventTrackingNumber: '',
-                    startTime: null,
-                    endTime: null
-                };
             }
 
             if (thisObject.actions === 'CAN' || thisObject.actions === 'EXP') {
@@ -1267,18 +1301,14 @@ Louisiana out 20 to 60 NM-`;
                 // Ensure timestamp is followed by exactly two newlines (timestamp ends paragraph)
                 out = out.replace(/((?:At\s+)?(?:\d{3,4}|\d{1,2}(?::\d{2})?)\s*(?:AM|PM)\s*(?:PST|PDT|MST|MDT|CST|CDT|EST|EDT|HST|HDT|AKDT|AKST)\s*(?:,?\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun))?\s*[A-Za-z]{3}\s+\d{1,2}\s+\d{4})\n*/gi, '$1\n\n');
 
-                // 10) Collapse double-newline after common section headings (LAT...LON, TIME...MOT...LOC, WIND..., HAIL..., etc.)
+                // 10) Collapse double-newline after common section headings (EXCEPT those that should remain their own paragraph)
                 (function(){
+                    // keep these compact (collapse the extra blank line)
                     const headings = [
-                        'LAT...LON',
-                        'TIME...MOT...LOC',
-                        'TIME.MOT.LOC',
                         'WIND',
                         'HAIL',
                         'HAIL THREAT',
                         'WIND THREAT',
-                        'MAX HAIL SIZE',
-                        'MAX WIND GUST',
                         'TORNADO',
                         'TORNADO DAMAGE THREAT',
                         'THUNDERSTORM DAMAGE THREAT',
@@ -1295,11 +1325,65 @@ Louisiana out 20 to 60 NM-`;
                     }
                 })();
 
-                // 8) Remove newline after hyphen-terminated areaDesc (e.g. "Coastal Del Norte-Northern Humboldt Coast-\nIncluding ...")
-                out = out.replace(/(-)\n+(?=\s*(Including\b|[A-Z][a-z]))/g, '$1');
+                // Ensure the following headings have TWO newlines BEFORE them but ONLY ONE newline AFTER
+                (function(){
+                    const adjust = ['LAT...LON','TIME...MOT...LOC','TIME.MOT.LOC','MAX HAIL SIZE','MAX WIND GUST','WATERSPOUT'];
+                    for (const h of adjust) {
+                        const esc = h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+                        // 1) If the heading follows a paragraph without a blank line, ensure a blank line BEFORE it
+                        //    (convert single-newline separation into a paragraph break)
+                        out = out.replace(new RegExp('([^\\n])\\n(\\s*' + esc + '(?:\\.{2,}|\\.{0,3})?[^\\n]*)','gi'), '$1\\n\\n$2');
+
+                        // 2) Normalize any amount of blank lines BEFORE the heading down to exactly TWO
+                        out = out.replace(new RegExp('\\n{2,}(\\s*' + esc + '(?:\\.{2,}|\\.{0,3})?[^\\n]*)','gi'), '\\n\\n$1');
+
+                        // 3) Ensure exactly ONE newline AFTER the heading (collapse 2+ following newlines to 1)
+                        out = out.replace(new RegExp('(' + esc + '(?:\\.{2,}|\\.{0,3})?[^\\n]*)\\n{2,}','gi'), '$1\\n');
+
+                        // 4) If heading is at EOF with no trailing newline, ensure a single trailing newline
+                        out = out.replace(new RegExp('(' + esc + '(?:\\.{2,}|\\.{0,3})?[^\\n]*)$','gi'), '$1\\n');
+                    }
+                })();
+
+                // 8) Hyphen-terminated areaDesc handling:
+                //    - keep adjacent capitalized fragments joined (e.g. "X-\nY" -> "X-Y")
+                //    - collapse stray newlines inside long hyphen-separated areaDesc paragraphs
+                //      (e.g. "Mariposa-...-Kings Canyon NP-Grant Grove Area" should be a single paragraph)
+                out = out.replace(/(-)\n+(?=\s*[A-Z][a-z])/g, '$1');
+
+                // Collapse internal single-newlines inside paragraphs that contain multiple hyphen-separated
+                // tokens (these are almost always areaDesc lines). Run this BEFORE we force a newline
+                // before "Including" so the subsequent rule can place "Including" on its own line.
+                out = out.replace(/(^|\n)((?:(?!\n).*-){2,}.*?)(?=\n{2,}|$)/gm, function(_, pfx, body){
+                    return pfx + body.replace(/\n+/g, ' ');
+                });
+
+                // Ensure 'Including' starts on its own line when it follows an area-desc fragment
+                out = out.replace(/-\s*(Including\b)/gi, '-\n$1');
 
                 // 9) Collapse any newlines inside an "Including ..." list (until the next paragraph) into spaces
+                //    (the "Including" heading will be on its own line due to the rule above)
                 out = out.replace(/(Including\b[\s\S]*?)(?=\n{2,}|$)/gi, function(m){ return m.replace(/\n+/g, ' '); });
+
+                // 9b) Normalize "locations ... include" blocks:
+                //    - ensure exactly one newline after the heading, list each location on its own line,
+                //      and end the list with two newlines (unless the following paragraph already provides separation).
+                out = out.replace(/(locations(?:\s+impacted)?\s+includes?\b[^\n]*)\n+([\s\S]*?)(?=\n{2,}|$)/gi, function(_, heading, listBody){
+                    // collapse internal newlines to spaces, then split on common separators
+                    const flat = listBody.replace(/\n+/g, ' ').trim();
+                    const parts = flat.split(/\s*(?:,|;|\/|\band\b|\s-\s|\s+—\s+)\s*/i).map(s=>s.trim()).filter(Boolean);
+                    if (parts.length <= 1) {
+                        // not a multi-item list — ensure single newline after heading and keep remainder
+                        return heading + '\n' + flat;
+                    }
+                    // return heading + newline + one-item-per-line + paragraph break
+                    return heading + '\n' + parts.join('\n') + '\n\n';
+                });
+
+                // 9c) Collapse an extra blank line before short all-caps region/state names (e.g. "\n\nKANSAS") to a single newline,
+                //      but do not collapse section headings like PRECAUTIONARY/PREPAREDNESS ACTIONS or other known section headers.
+                out = out.replace(/\n{2,}(?=\s*(?!PRECAUTIONARY|PREPAREDNESS|ACTIONS|WHAT|WHERE|IMPACTS|LAT\.{3}|TIME|WIND|HAIL|TORNADO)[A-Z0-9 '\&\-.]{1,40}\b(?:\.{3})?(?:\n|$))/gi, '\n');
 
                 // 11) Collapse double-newline between numeric-only lines (UGC/LAT...LON number lists)
                 // Convert patterns like "1234 56789\n\n2345 67890" -> single newline between numeric lines
@@ -1324,8 +1408,9 @@ Louisiana out 20 to 60 NM-`;
                 // This keeps preamble blocks visually separated: "546\nWWUS71 KBUF 170217\nNPWBUF\n\n"
                 out = out.replace(/(^|\n)([A-Z]{3,8})\n(?!\n)/gm, '$1$2\n\n');
 
-                // Ensure PRECAUTIONARY/PREPAREDNESS ACTIONS... is its own paragraph (surrounded by two newlines)
-                out = out.replace(/\n{0,2}\s*(PRECAUTIONARY\/PREPAREDNESS ACTIONS\.{3,})\s*\n{0,2}/gi, '\n\n$1\n\n');
+                // Ensure PRECAUTIONARY / PREPAREDNESS ACTIONS (with or without leading '*') is its own paragraph
+                // Accept optional spaces around the slash and preserve a leading '* ' if present.
+                out = out.replace(/\n{0,2}\s*(\*\s*)?(PRECAUTIONARY\s*\/\s*PREPAREDNESS ACTIONS\.{3,})\s*\n{0,2}/gi, '\n\n$1$2\n\n');
 
                 // Final enforcement: ensure '&&' and '$$' are surrounded by exactly two newlines
                 // This runs last so earlier replacements can't collapse these separators.
@@ -1341,6 +1426,81 @@ Louisiana out 20 to 60 NM-`;
                 out = out.replace(/\n{3,}/g, '\n\n');
 
                 return out;
+            }
+
+            // Normalize incoming message newlines and enforce heading spacing rules.
+            // Hoisted so it can be used early during CAP/rawText processing as well as per-part.
+            function formatMessageNewlines(msg) {
+                if (!msg) return msg;
+                let formatted = String(msg);
+
+                // 0) Remove all XML tags (anything between < and >)
+                formatted = formatted.replace(/<[^>]+>/g, '');
+
+                // 1) Convert literal escaped sequences ("\\n", "\\r\\n") into actual newlines
+                formatted = formatted.replace(/\\r\\n/g, '\n');
+                formatted = formatted.replace(/\\n/g, '\n');
+
+                // 2) Normalize any remaining CR/LF into \n
+                formatted = formatted.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+                // 3) Remove stray trailing/leading whitespace around newlines (prevents " <newline>HEADING" cases)
+                formatted = formatted.replace(/[ \t]+\n/g, '\n');
+                formatted = formatted.replace(/\n[ \t]+/g, '\n');
+                formatted = formatted.replace(/^\s+|\s+$/g, '');
+
+                // 4) Defensive: replace any remaining backslash+n sequences
+                formatted = formatted.replace(/\\+n/g, '\n');
+
+                // 5) Collapse runs of 3+ newlines down to exactly 2 (paragraph separation)
+                formatted = formatted.replace(/\n{3,}/g, '\n\n');
+
+                // 6) Ensure exact spacing before headings that should have TWO newlines
+                const twoNL = ['HAZARD\\.\\.\\.', 'SOURCE\\.\\.\\.', 'IMPACT\\.\\.\\.', 'Locations impacted include'];
+                for (const h of twoNL) {
+                    // If the heading is on the same line as previous text (possibly separated by spaces),
+                    // strip those spaces and insert exactly two newlines before the heading.
+                    formatted = formatted.replace(new RegExp('([^\\n\\s])\\s*(' + h + ')', 'g'), '$1\n\n$2');
+                    // Collapse any existing newline(s)+optional spaces before the heading to exactly two newlines
+                    formatted = formatted.replace(new RegExp('\\n+\\s*(' + h + ')', 'g'), '\n\n$1');
+                }
+
+                // 7) Ensure exact spacing before headings that should have ONE newline
+                const oneNL = [
+                    'TORNADO DAMAGE THREAT\\.\\.\\.',
+                    'THUNDERSTORM DAMAGE THREAT\\.\\.\\.',
+                    'FLASH FLOOD DAMAGE THREAT\\.\\.\\.',
+                    'FLASH FLOOD\\.\\.\\.',
+                    'TIME\\.\\.\\.MOT\\.\\.\\.LOC',
+                    'TORNADO\\.\\.\\.',
+                    'WATERSPOUT\\.\\.\\.',
+                    'SNOW SQUAL\\.\\.\\.',
+                    'SNOW SQUALL IMPACT\\.\\.\\.',
+                    'SNOW SQUALL\\.\\.\\.',
+                    'MAX WIND GUST\\.\\.\\.',
+                    'MAX HAIL SIZE\\.\\.\\.',
+                    'WIND THREAT\\.\\.\\.',
+                    'HAIL THREAT\\.\\.\\.',
+                    'WIND, AND HAIL\\.\\.\\.',
+                    'AND HAIL\\.\\.\\.',
+                    'EXPECTED RAINFALL RATE\\.\\.\\.'
+                ];
+                for (const h of oneNL) {
+                    // If heading immediately follows text (possibly with spaces), strip spaces and insert one newline
+                    formatted = formatted.replace(new RegExp('([^\\n\\s])\\s*(' + h + ')', 'g'), '$1\n$2');
+                    // Collapse any existing newline(s)+optional spaces before the heading to exactly one newline
+                    formatted = formatted.replace(new RegExp('\\n+\\s*(' + h + ')', 'g'), '\n$1');
+                }
+
+                // 8) Ensure TIME...MOT...LOC is single-lined (followed by normal spacing)
+                formatted = formatted.replace(/(LAT\.\.\.LON[^\n]*)\n+(\s*TIME\.\.\.MOT\.\.\.LOC)/g, '$1\n$2');
+
+                // 9) Final pass: remove any remaining trailing spaces before newlines, collapse multiples and trim
+                formatted = formatted.replace(/[ \t]+\n/g, '\n');
+                formatted = formatted.replace(/\n{3,}/g, '\n\n');
+                formatted = formatted.replace(/^\s+|\s+$/g, '');
+
+                return formatted;
             }
 
             // --- START: Message cleanup and splitting logic ---
@@ -1434,7 +1594,14 @@ Louisiana out 20 to 60 NM-`;
             }
 
             // Use the new cleanup/split function
-            let messageParts = cleanAndSplitMessage(rawText);
+            // For non‑VTEC CAP minimal-cleanup messages we must NOT split the text — keep a single part.
+            let messageParts;
+            if (capMinimalCleanup) {
+                // keep the entire minimal-cleanup payload as a single message part (preserve formatting)
+                messageParts = [rawText];
+            } else {
+                messageParts = cleanAndSplitMessage(rawText);
+            }
 
             // --- END: Message cleanup and splitting logic ---
 
@@ -1731,6 +1898,10 @@ Louisiana out 20 to 60 NM-`;
                     ? `${vtecObj.office}.${vtecObj.phenomena}.${vtecObj.significance}.${vtecObj.eventTrackingNumber}`
                     : (vtecId || idString);
 
+                // Format message with proper newline spacing (hoisted to file scope)
+
+                const formattedMessage = formatMessageNewlines(msgPart);
+
                 let alertObj = {
                     name: alertName,
                     id: (messageParts.length === 1) ? baseId : (baseId + '_' + idx),
@@ -1738,7 +1909,7 @@ Louisiana out 20 to 60 NM-`;
                     headline: headline,
                     issued: (vtecObj && vtecObj.startTime) ? vtecObj.startTime : (thisObject && thisObject.startTime) || null,
                     expiry: (vtecObj && vtecObj.endTime) ? vtecObj.endTime : ((thisObject && thisObject.endTime) ? thisObject.endTime : (capExpires || null)),
-                    message: msgPart,
+                    message: formattedMessage,
                     ugc: [],
                     areaDesc: '',
                     properties: props
@@ -2053,6 +2224,42 @@ Louisiana out 20 to 60 NM-`;
                     }
 
                     // attach under the exact name the request used (only keys with values are present)
+                    // --- Simplify and canonicalize threat fields (user request):
+                    // convert long/freeform values into short canonical phrases (e.g. "RADAR INDICATED", "POSSIBLE", "CONSIDERABLE")
+                    function simplifyThreatValue(v) {
+                        if (!v) return v;
+                        let s = String(v).trim();
+                        if (!s) return s;
+                        const up = s.toUpperCase();
+
+                        // First, try to extract just the core threat indicator by stopping at "MAX" or other breaking points
+                        const truncated = up.replace(/\s+(MAX|SIZE|HAIL|WIND|GUST|SPEED|DAMAGE|IMPACT|DEPTH|ACCUMULATION|RATE).*$/i, '').trim();
+                        const core = truncated || up;
+
+                        // Prefer to detect RADAR-based indicators
+                        if (core.includes('RADAR INDICATED')) return 'RADAR INDICATED';
+                        if (core.includes('RADAR ESTIMAT') || core.includes('RADAR-ESTIMAT')) return 'RADAR ESTIMATED';
+
+                        // Common short keywords we want to preserve
+                        if (/\bPOSSIBLE\b/.test(core)) return 'POSSIBLE';
+                        if (/\bCONSIDERABLE\b/.test(core)) return 'CONSIDERABLE';
+                        if (/\bNONE\b/.test(core)) return 'NONE';
+                        if (/\bLIKELY\b/.test(core)) return 'LIKELY';
+                        if (/\bCONFIRMED\b/.test(core)) return 'CONFIRMED';
+
+                        // If the core string is already short (<= 30 chars) keep it as-is (cleaned)
+                        if (core.length <= 30) return core;
+
+                        // Otherwise return the first few words up to punctuation/newline/break
+                        const m = core.match(/^([^\n\.,;:\$]{1,60})/);
+                        return (m && m[1]) ? m[1].trim() : up.trim();
+                    }
+
+                    const _threatKeys = ['HAIL_THREAT','HAIL_DAMAGE_THREAT','WIND_THREAT','WIND_DAMAGE_THREAT','TORNADO_DAMAGE_THREAT','FLASH_FLOOD_DAMAGE_THREAT','THUNDERSTORM_DAMAGE_THREAT','FLASH_FLOOD'];
+                    for (const tk of _threatKeys) {
+                        if (Object.prototype.hasOwnProperty.call(ai, tk) && ai[tk]) ai[tk] = simplifyThreatValue(ai[tk]);
+                    }
+
                     alertObj.alertinfo = ai;
                 })();
                 // --- END: alertinfo build ---
@@ -2080,28 +2287,25 @@ Louisiana out 20 to 60 NM-`;
                     alerts = [];
                 }
 
-                // For each parsedAlert, check for duplicate and add if not present
+                // For each parsedAlert, remove any existing alert with the same eventTrackingNumber, then add the new one
                 parsedAlerts.forEach(parsedAlert => {
-                    const isDuplicate = alerts.some(alert =>
-                        alert.properties &&
-                        alert.properties.vtec &&
-                        alert.properties.vtec.office === parsedAlert.properties.vtec.office &&
-                        alert.properties.vtec.phenomena === parsedAlert.properties.vtec.phenomena &&
-                        alert.properties.vtec.significance === parsedAlert.properties.vtec.significance &&
-                        alert.properties.vtec.eventTrackingNumber === parsedAlert.properties.vtec.eventTrackingNumber &&
-                        alert.message === parsedAlert.message // also check message part
-                    );
-
-                    if (isDuplicate) {
-                        console.log(`Duplicate alert detected, skipping: ${parsedAlert.name}`);
-                        log('Duplicate alert detected, skipping: ' + parsedAlert.name);
-                    } else {
-                        alerts.push(parsedAlert);
-                        console.log(`✓ Alert stored successfully: ${parsedAlert.name} (ID: ${parsedAlert.id})`);
-                        log('Alert stored successfully: ' + parsedAlert.name);
+                    const etn = parsedAlert.properties && parsedAlert.properties.event_tracking_number;
+                    if (etn) {
+                        const removedAlerts = alerts.filter(alert => alert.properties && alert.properties.event_tracking_number === etn);
+                        if (removedAlerts.length > 0) {
+                            removedAlerts.forEach(removedAlert => {
+                                console.log(`✗ Alert removed: ${removedAlert.name} (ID: ${removedAlert.id})`);
+                                log('Alert removed: ' + removedAlert.name + ' (ID: ' + removedAlert.id + ')');
+                            });
+                        }
+                        alerts = alerts.filter(alert => {
+                            return !(alert.properties && alert.properties.event_tracking_number === etn);
+                        });
                     }
+                    alerts.push(parsedAlert);
+                    console.log(`✓ Alert stored successfully: ${parsedAlert.name} (ID: ${parsedAlert.id})`);
+                    log('Alert stored successfully: ' + parsedAlert.name + ' (ID: ' + parsedAlert.id + ')');
                 });
-
                 fs.writeFileSync('alerts.json', JSON.stringify(alerts, null, 2));
             } catch (err) {
                 console.error('Error updating alerts.json:', err);
