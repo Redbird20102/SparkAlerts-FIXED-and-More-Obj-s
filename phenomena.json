@@ -116,7 +116,7 @@
     "significance": ["W", "A", "Y", "S"]
   },
   "LB": {
-    "name": "Lake Effect Snow and Blowing Snow",
+    "name": "Lake Effect Snow",
     "significance": ["W", "A", "Y", "S"]
   },
   "LE": {
@@ -136,11 +136,11 @@
     "significance": ["W", "A", "Y", "S"]
   },
   "MA": {
-    "name": "Marine Weather",
+    "name": "Special Marine",
     "significance": ["W", "A", "Y", "S"]
   },
   "MF": {
-    "name": "Marine Dense Fog",
+    "name": "Dense Fog",
     "significance": ["W", "A", "Y", "S"]
   },
   "MH": {
@@ -152,7 +152,7 @@
     "significance": ["W", "A", "Y", "S"]
   },
   "RB": {
-    "name": "Small Craft for Rough Bar",
+    "name": "Small Craft",
     "significance": ["W", "A", "Y", "S"]
   }, 
    "RH": {
@@ -164,7 +164,7 @@
     "significance": ["W", "A", "Y", "S"]
  },
   "SC": {
-    "name": "Small Craft Advisory",
+    "name": "Small Craft",
     "significance": ["W", "A", "Y", "S"]
   },
   "SE": {
@@ -172,7 +172,7 @@
     "significance": ["W", "A", "Y", "S"]
   },
   "SI": {
-    "name": "Small Craft for Winds",
+    "name": "Small Craft",
     "significance": ["W", "A", "Y", "S"]
   },
   "SM": {
@@ -200,7 +200,7 @@
     "significance": ["W", "A", "Y", "S"]
   },
   "SW": {
-    "name": "Small Craft for Hazardous Seas",
+    "name": "Small Craft",
     "significance": ["W", "A", "Y", "S"]
   },
   "TI": {
